@@ -20,12 +20,14 @@ Install the one dependency:
         ├── run_robustness.py    run the test battery and write a report
         ├── run_sweep.py         distractor sweep to locate the ZPD
         ├── run_arith.py         arithmetic sweep to locate the ZPD
+        ├── run_algebra.py       coefficient-extraction sweep to locate the ZPD
         ├── dashboard.py         live browser monitor for a battery run
         ├── chat_dashboard.py    manual chat dashboard, no battery
         └── shared/
             ├── cases.py             test-case definitions and validators
             ├── sweep.py             distractor-needle sweep and K-rate runner
             ├── arithmetic.py        chained-arithmetic sweep family
+            ├── algebra.py           polynomial coefficient-extraction family
             ├── lmstudio_client.py   client and single-probe primitive
             └── reporting.py         console table and JSON report writer
 
@@ -76,7 +78,14 @@ A second sweep uses chained arithmetic, evaluated strictly left to right, with o
     python src/run_arith.py
     python src/run_arith.py --steps 2 4 6 8 10 12 --no-think
 
-Same K-rate and band reporting. The step count is the difficulty lever; longer chains push the model from reliable to unreliable.
+Same K-rate and band reporting. The step count is the difficulty lever; longer chains push the model from reliable to unreliable. The arithmetic builder also takes `--ops addsub` to drop multiplication and drive difficulty through chain length alone.
+
+A third sweep extracts a polynomial coefficient. It expands a product of K linear factors and asks for the coefficient of x^2, with the factor count as the knob:
+
+    python src/run_algebra.py
+    python src/dashboard.py --no-battery --no-arith --no-distractor --algebra-factors 3 4 5 6 7 8
+
+The answer is a single integer, so the model always commits, and ground truth comes from sympy. This is the first family designed to fail through wrong answers rather than blanks.
 
 ## Experiment log
 
@@ -119,22 +128,34 @@ At 8192 single-instance the rate was non-monotonic across step counts (12 at 0.8
 
 **Conclusion.** My conclusion is that the model's hard failure mode at this difficulty is a non-answer, not a wrong answer. Multiplication inflates both the magnitude of intermediate values and the length of the reasoning trace, and beyond a threshold the model spirals into second-guessing reasoning that exhausts the token budget or the wall-clock before it commits. This is a reasoning-capacity limit distinct from an arbitrary token ceiling: the ceiling can be raised and the collapse simply moves with it. The mechanism for overwhelming the model's reasoning capacity is reproducible.
 
+### Operator restriction
+
+**Hypothesis.** My hypothesis was that removing multiplication and driving difficulty through chain length alone would bound the reasoning trace and force the model to commit, converting blanks into wrong but present totals.
+
+**Changes.** An addition and subtraction only operator set (`--ops addsub`), swept over 20, 30, and 40 term chains.
+
+**Result.** Rate held at 0.00 across all three lengths, with `med_tok` pinned at the cap and empty samples. The model narrates one line per term regardless of operator, so reasoning length still scales with the chain and overflows before an answer is emitted.
+
+**Conclusion.** My conclusion is that removing multiplication does not bound the reasoning trace, because the model's narration cost is set by the number of operations, not their type. With thinking enabled the addition and subtraction task is binary in the same way the mixed task was: a completed narration is accurate, and an incomplete one is blank. There is no corruption band in a task whose per-step reasoning is mechanically correct.
+
 ### Current direction
 
-**Hypothesis.** Between reliable computation and total collapse there is a perplexity band in which the model commits to an answer but computes it incorrectly. My hypothesis is that this band is reachable by removing the magnitude and reasoning-length blowup that multiplication introduces and driving difficulty through chain length alone, so that failures present as corrupted answers rather than blanks.
+**Hypothesis.** A corruption band, where the model commits to a definite but incorrect answer, requires a task whose answer is short, so output length never forces a blank, and whose reasoning steps each carry real error probability, so mistakes accumulate into a confident wrong answer. My hypothesis is that addition and subtraction failed to corrupt because its per-step reasoning is error-free, and that a task with error-prone steps and a one-token answer will expose the band without suppressing the model's reasoning.
 
-**Planned change.** An addition and subtraction only operator set, swept over long chains (20, 30, 40 terms), with the token budget held fixed. A bounded reasoning length should force the model to commit, exposing genuine arithmetic slips as wrong but present totals.
+**Planned change.** Polynomial coefficient extraction. The product of K linear factors has a single integer coefficient of x^2, so the model always commits, while combining cross-terms across many factors is error-prone and should produce wrong coefficients before the expansion narration grows long enough to truncate. If the corruption band proves narrow before truncation, the calculus variant (a derivative at a point, evaluated to an integer) concentrates more difficulty into an equally short answer.
 
 ### Persistent findings
 
-The reasoning trace, not the answer, sets the token budget for a thinking-enabled model; size the cap to the trace. A substring-match validator produces false positives that scale with reply length, so the final answer must be graded in isolation. A single fixed instance per level confounds difficulty with instance luck; multiple instances must be sampled and averaged. The model's high-difficulty failure mode is the blank rather than the wrong answer, and resource ceilings relocate that collapse rather than removing it.
+The reasoning trace, not the answer, sets the token budget for a thinking-enabled model; size the cap to the trace. A substring-match validator produces false positives that scale with reply length, so the final answer must be graded in isolation. A single fixed instance per level confounds difficulty with instance luck; multiple instances must be sampled and averaged. The model's high-difficulty failure mode is the blank rather than the wrong answer, and resource ceilings relocate that collapse rather than removing it. Narration cost is set by the number of reasoning steps, not their difficulty, so a task with mechanically correct steps fails only by truncation; a corruption band requires per-step error probability paired with a short answer.
 
 ### Pending experiments
 
 | Experiment | Status |
 | --- | --- |
-| Addition and subtraction length sweep | pending |
-| Perplexity sweet spot search, corruption before collapse | pending |
+| Addition and subtraction length sweep | done, no corruption band, narration still truncates |
+| Polynomial coefficient extraction | running |
+| Derivative at a point | pending, if the algebra band is narrow |
+| Perplexity sweet spot characterisation | pending |
 | Distractor discrimination scaling | shelved, saturated |
 | Robustness battery with thinking disabled at source | pending |
 
