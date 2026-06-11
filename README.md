@@ -21,6 +21,7 @@ Install the one dependency:
         ├── run_sweep.py         distractor sweep to locate the ZPD
         ├── run_arith.py         arithmetic sweep to locate the ZPD
         ├── run_algebra.py       coefficient-extraction sweep to locate the ZPD
+        ├── run_calculus.py      derivative-at-a-point sweep to locate the ZPD
         ├── dashboard.py         live browser monitor for a battery run
         ├── chat_dashboard.py    manual chat dashboard, no battery
         └── shared/
@@ -28,6 +29,7 @@ Install the one dependency:
             ├── sweep.py             distractor-needle sweep and K-rate runner
             ├── arithmetic.py        chained-arithmetic sweep family
             ├── algebra.py           polynomial coefficient-extraction family
+            ├── calculus.py          derivative-at-a-point family
             ├── lmstudio_client.py   client and single-probe primitive
             └── reporting.py         console table and JSON report writer
 
@@ -87,6 +89,13 @@ A third sweep extracts a polynomial coefficient. It expands a product of K linea
 
 The answer is a single integer, so the model always commits, and ground truth comes from sympy. This is the first family designed to fail through wrong answers rather than blanks.
 
+A fourth sweep takes a derivative at a point. It builds a product of K linear factors, asks for f'(a) at an integer point, and returns one integer, with the factor count as the knob:
+
+    python src/run_calculus.py
+    python src/dashboard.py --no-battery --no-arith --no-distractor --no-algebra --calculus-factors 3 4 5 6 7 --timeout 360
+
+Differentiation narration is shorter than a full expansion, so more genuine difficulty fits before truncation.
+
 ## Experiment log
 
 The battery and sweeps were run against Qwen3-8B (4-bit MLX) served locally through LM Studio. Each run isolates one variable. Rate is the fraction of trials whose validated answer was correct.
@@ -138,24 +147,44 @@ At 8192 single-instance the rate was non-monotonic across step counts (12 at 0.8
 
 **Conclusion.** My conclusion is that removing multiplication does not bound the reasoning trace, because the model's narration cost is set by the number of operations, not their type. With thinking enabled the addition and subtraction task is binary in the same way the mixed task was: a completed narration is accurate, and an incomplete one is blank. There is no corruption band in a task whose per-step reasoning is mechanically correct.
 
+### Algebra sweep
+
+**Hypothesis.** My hypothesis was that polynomial coefficient extraction, with a single integer answer and error-prone cross-term combination, would expose a band in which the model commits to a wrong coefficient.
+
+**Changes.** A product of K linear factors with the coefficient of x^2 requested, ground truth from sympy, factor count as the knob. Five instances per count, three trials, temperature 0.7.
+
+**Result.** At a 4096 cap the rate was **0.93** at K=3 and **0.53** at K=4, the latter with `med_tok` at the cap, so its failures mixed wrong coefficients with truncation. Raising the cap to 8192 resolved K=4 to **0.89** (`med_tok` 3645, completing) with at least one finished trial returning a wrong coefficient, while K=5 and above truncated at the cap with no answer.
+
+**Conclusion.** My conclusion is that committed wrong answers do occur, the finished error at K=4 confirms it, but the expansion narration grows fast enough that truncation overtakes the band. The window in which the model commits and errs sits near K=5, which the cap cannot reach before the narration overflows. Coefficient extraction places the band behind a truncation wall.
+
+### Calculus sweep
+
+**Hypothesis.** My hypothesis was that a derivative at a point would concentrate error-prone product-rule reasoning into a shorter narration than a full expansion, opening the band before truncation.
+
+**Changes.** f(x) is a product of K linear factors; the model computes f'(x), evaluates it at an integer point, and returns one integer. Ground truth from sympy, factor count as the knob. Three instances per count, three trials, 4096 cap.
+
+**Result.** K=3 held at **0.89**, and **K=4 landed in band at 0.667** with `med_tok` 3604 under the cap and non-empty answers, so its failures are genuine wrong derivatives rather than truncation. K=5 and above collapse to **0.00** at the cap.
+
+**Conclusion.** My conclusion is that this is the corruption band the project set out to find. The model is reliable at K=3, commits to definite but incorrect values at K=4, and collapses into truncation at K=5. Differentiation concentrates more genuine difficulty per output token than expansion, so the band opens one step before the truncation wall rather than behind it. The reliable, corrupt, collapse progression is now observable in a single sweep.
+
 ### Current direction
 
-**Hypothesis.** A corruption band, where the model commits to a definite but incorrect answer, requires a task whose answer is short, so output length never forces a blank, and whose reasoning steps each carry real error probability, so mistakes accumulate into a confident wrong answer. My hypothesis is that addition and subtraction failed to corrupt because its per-step reasoning is error-free, and that a task with error-prone steps and a one-token answer will expose the band without suppressing the model's reasoning.
+**Hypothesis.** The corruption band at K=4 is narrow, bounded below by reliable computation at K=3 and above by truncation at K=5. My hypothesis is that the band can be widened, and its rate estimate tightened, by lowering the factor magnitude so the K=5 narration completes, and by sampling more trials at the band edges.
 
-**Planned change.** Polynomial coefficient extraction. The product of K linear factors has a single integer coefficient of x^2, so the model always commits, while combining cross-terms across many factors is error-prone and should produce wrong coefficients before the expansion narration grows long enough to truncate. If the corruption band proves narrow before truncation, the calculus variant (a derivative at a point, evaluated to an integer) concentrates more difficulty into an equally short answer.
+**Planned change.** Concentrate the calculus sweep on K=4 and K=5 with more trials, reduce the constant range to shorten the K=5 narration so its true rate becomes visible, and characterise how the corruption rate moves with the evaluation point and the magnitude of intermediate values.
 
 ### Persistent findings
 
-The reasoning trace, not the answer, sets the token budget for a thinking-enabled model; size the cap to the trace. A substring-match validator produces false positives that scale with reply length, so the final answer must be graded in isolation. A single fixed instance per level confounds difficulty with instance luck; multiple instances must be sampled and averaged. The model's high-difficulty failure mode is the blank rather than the wrong answer, and resource ceilings relocate that collapse rather than removing it. Narration cost is set by the number of reasoning steps, not their difficulty, so a task with mechanically correct steps fails only by truncation; a corruption band requires per-step error probability paired with a short answer.
+The reasoning trace, not the answer, sets the token budget for a thinking-enabled model; size the cap to the trace. A substring-match validator produces false positives that scale with reply length, so the final answer must be graded in isolation. A single fixed instance per level confounds difficulty with instance luck; multiple instances must be sampled and averaged. The model's high-difficulty failure mode is the blank rather than the wrong answer, and resource ceilings relocate that collapse rather than removing it. Narration cost is set by the number of reasoning steps, not their difficulty, so a task with mechanically correct steps fails only by truncation; a corruption band requires per-step error probability paired with a short answer. Among the families tested, differentiation at a point concentrates the most error-prone reasoning per output token, which is why it reaches the corruption band one difficulty step before the truncation wall while expansion reaches it one step behind.
 
 ### Pending experiments
 
 | Experiment | Status |
 | --- | --- |
 | Addition and subtraction length sweep | done, no corruption band, narration still truncates |
-| Polynomial coefficient extraction | running |
-| Derivative at a point | pending, if the algebra band is narrow |
-| Perplexity sweet spot characterisation | pending |
+| Polynomial coefficient extraction | done, band hidden behind truncation near K=5 |
+| Derivative at a point | done, ★ corruption band located at K=4, rate 0.67 |
+| Calculus band characterisation, K=4 to K=5 | next |
 | Distractor discrimination scaling | shelved, saturated |
 | Robustness battery with thinking disabled at source | pending |
 

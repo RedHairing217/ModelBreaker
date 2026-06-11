@@ -30,6 +30,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from shared.algebra import build_algebra_sweep
+from shared.calculus import build_calculus_sweep
 from shared.arithmetic import build_arithmetic_sweep
 from shared.cases import build_cases
 from shared.lmstudio_client import build_client, probe
@@ -61,6 +62,9 @@ DEFAULTS = {
     "algebra_factors": [3, 4, 5, 6, 7, 8],
     "algebra_instances": 5,
     "algebra_max_tokens": 4096,
+    "calculus_factors": [3, 4, 5, 6, 7],
+    "calculus_instances": 3,
+    "calculus_max_tokens": 4096,
     "arith_max_tokens": 1024,
     "timeout": 120,
     "distractors": [0, 2, 4, 8, 16, 32],
@@ -110,7 +114,7 @@ class SessionState:
         self.results = []
         self.transcript = []
         self.summary = None
-        self.sweeps = {"arith": [], "distractor": [], "algebra": []}
+        self.sweeps = {"arith": [], "distractor": [], "algebra": [], "calculus": []}
         self.error = ""
         self.start_time = 0.0
         self.lock = threading.Lock()
@@ -125,7 +129,7 @@ class SessionState:
             self.results = []
             self.transcript = []
             self.summary = None
-            self.sweeps = {"arith": [], "distractor": [], "algebra": []}
+            self.sweeps = {"arith": [], "distractor": [], "algebra": [], "calculus": []}
             self.error = ""
             self.start_time = time.time()
 
@@ -240,13 +244,14 @@ def run_session(args):
         arith_variants = build_arithmetic_sweep(args.steps, instances=args.arith_instances, no_think=args.no_think, max_tokens=args.arith_max_tokens, ops=args.arith_ops) if args.run_arith else []
         distractor_variants = build_sweep(args.distractors, args.context_tokens, no_think=args.no_think) if args.run_distractor else []
         algebra_variants = build_algebra_sweep(args.algebra_factors, instances=args.algebra_instances, no_think=args.no_think, max_tokens=args.algebra_max_tokens) if args.run_algebra else []
+        calculus_variants = build_calculus_sweep(args.calculus_factors, instances=args.calculus_instances, no_think=args.no_think, max_tokens=args.calculus_max_tokens) if args.run_calculus else []
     except Exception as exception:
         with STATE.lock:
             STATE.status = "error"
             STATE.error = f"{type(exception).__name__}: {exception}"
         return
 
-    sweep_cases = (sum(len(c) for _, c in arith_variants) + sum(len(c) for _, c in distractor_variants) + sum(len(c) for _, c in algebra_variants))
+    sweep_cases = (sum(len(c) for _, c in arith_variants) + sum(len(c) for _, c in distractor_variants) + sum(len(c) for _, c in algebra_variants) + sum(len(c) for _, c in calculus_variants))
     sweep_units = sweep_cases * args.trials
     with STATE.lock:
         STATE.total = len(battery_cases) + sweep_units
@@ -273,6 +278,11 @@ def run_session(args):
         algebra = run_sweep_phase(client, args.model, algebra_variants, "algebra sweep", "algebra",
                                   args.trials, args.temperature, band)
         write_sweep_report(algebra, str(ROOT / "reports/dashboard_algebra.json"), args, "algebra")
+
+    if calculus_variants:
+        calculus = run_sweep_phase(client, args.model, calculus_variants, "calculus sweep", "calculus",
+                                   args.trials, args.temperature, band)
+        write_sweep_report(calculus, str(ROOT / "reports/dashboard_calculus.json"), args, "calculus")
 
     with STATE.lock:
         STATE.status = "done"
@@ -458,7 +468,7 @@ function statusLabel(d) {
 
 function renderSweeps(sweeps) {
   const wrap = document.getElementById('sweeps');
-  const labels = [['arith', 'Arithmetic — by step count'], ['distractor', 'Distractors — by decoy count'], ['algebra', 'Algebra — by factor count']];
+  const labels = [['arith', 'Arithmetic — by step count'], ['distractor', 'Distractors — by decoy count'], ['algebra', 'Algebra — by factor count'], ['calculus', 'Calculus — by factor count']];
   const blocks = [];
   labels.forEach(([key, title]) => {
     const rows = (sweeps && sweeps[key]) || [];
@@ -625,6 +635,9 @@ def parse_args():
     parser.add_argument("--algebra-factors", type=int, nargs="+", default=DEFAULTS["algebra_factors"])
     parser.add_argument("--algebra-instances", type=int, default=DEFAULTS["algebra_instances"])
     parser.add_argument("--algebra-max-tokens", type=int, default=DEFAULTS["algebra_max_tokens"])
+    parser.add_argument("--calculus-factors", type=int, nargs="+", default=DEFAULTS["calculus_factors"])
+    parser.add_argument("--calculus-instances", type=int, default=DEFAULTS["calculus_instances"])
+    parser.add_argument("--calculus-max-tokens", type=int, default=DEFAULTS["calculus_max_tokens"])
     parser.add_argument("--arith-max-tokens", type=int, default=DEFAULTS["arith_max_tokens"])
     parser.add_argument("--timeout", type=int, default=DEFAULTS["timeout"])
     parser.add_argument("--distractors", type=int, nargs="+", default=DEFAULTS["distractors"])
@@ -637,6 +650,7 @@ def parse_args():
     parser.add_argument("--no-arith", action="store_true", help="Skip the arithmetic sweep phase")
     parser.add_argument("--no-distractor", action="store_true", help="Skip the distractor sweep phase")
     parser.add_argument("--no-algebra", action="store_true", help="Skip the algebra sweep phase")
+    parser.add_argument("--no-calculus", action="store_true", help="Skip the calculus sweep phase")
     parser.add_argument("--port", type=int, default=DEFAULTS["port"])
     parser.add_argument("--no-open", action="store_true", help="Do not open a browser window")
     args = parser.parse_args()
@@ -644,6 +658,7 @@ def parse_args():
     args.run_arith = not args.no_arith
     args.run_distractor = not args.no_distractor
     args.run_algebra = not args.no_algebra
+    args.run_calculus = not args.no_calculus
     return args
 
 
