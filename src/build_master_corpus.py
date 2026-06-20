@@ -9,6 +9,20 @@ SILOS = [
     ("realmath/reports/realmath_corpus.jsonl", "realmath", None),
 ]
 
+BAND_LO, BAND_HI = 0.125, 0.875
+
+
+def is_band(record):
+    if record["failure_mode"] == "band":
+        return True
+    p = record["pass_at_k"]
+    if p is None:
+        return False
+    try:
+        return BAND_LO <= float(p) <= BAND_HI
+    except (TypeError, ValueError):
+        return False
+
 
 def first(record, keys, default=""):
     for k in keys:
@@ -102,9 +116,15 @@ def main():
     ap.add_argument("--root", default=".")
     ap.add_argument("--jsonl", default="master_corpus.jsonl")
     ap.add_argument("--markdown", default="MASTER_CORPUS.md")
+    ap.add_argument("--all-modes", action="store_true",
+                    help="include every failure mode; default keeps band only")
     args = ap.parse_args()
 
     rows = load_silos(SILOS, args.root)
+    if not args.all_modes:
+        rows = [r for r in rows if is_band(r)]
+        for r in rows:
+            r["failure_mode"] = "band"
     rows.sort(key=lambda r: (r["source"], r["failure_mode"], r["family"]))
 
     write_jsonl(rows, os.path.join(args.root, args.jsonl))
