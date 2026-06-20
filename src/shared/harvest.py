@@ -34,6 +34,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from statistics import median
 
+from shared.bands import in_band
 from shared.lmstudio_client import ProbeResult, probe
 
 # ─────────────────────────────────────────────────────────────
@@ -326,7 +327,6 @@ def harvest(client, model, problems, *, classify, trials, prescreen_trials,
         prescreen_trials=prescreen_trials, temperature=temperature,
         thinking_mode=thinking_mode, on_progress=on_progress, progress_every=progress_every,
         extra_params=extra_params, detect_loops=detect_loops, loop_params=loop_params)
-    band_low, band_high = band
     max_degenerate = int(degenerate_threshold * trials)
     kept = []
     rejected = []
@@ -348,7 +348,7 @@ def harvest(client, model, problems, *, classify, trials, prescreen_trials,
         if result.degenerate_fraction > degenerate_threshold:
             result.status = "rejected_degenerate"
             rejected.append(result)
-        elif band_low <= result.pass_at_k <= band_high:
+        elif in_band(result.pass_at_k, band):
             result.in_band = True
             result.status = "kept"
             kept.append(result)

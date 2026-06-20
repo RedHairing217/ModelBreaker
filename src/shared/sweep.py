@@ -15,6 +15,7 @@ Usage:
 import statistics
 from dataclasses import dataclass
 
+from shared.bands import in_band as band_contains
 from shared.cases import Case, NO_THINK_DIRECTIVE, make_filler, user_message
 from shared.lmstudio_client import probe
 
@@ -107,7 +108,6 @@ def run_krate(client, model, level, cases, trials, temperature, band):
                 tokens.append(result.completion_tokens)
             last_response = result.response_text or result.error or ""
     rate = passes / attempts if attempts else 0.0
-    band_low, band_high = band
     return SweepResult(
         name=cases[0].name if cases else f"level_{level}",
         level=level,
@@ -116,6 +116,6 @@ def run_krate(client, model, level, cases, trials, temperature, band):
         rate=rate,
         latency_median=round(statistics.median(latencies), 2) if latencies else 0.0,
         tokens_median=round(statistics.median(tokens), 1) if tokens else 0.0,
-        in_band=band_low <= rate <= band_high,
+        in_band=band_contains(rate, band),
         sample_response=last_response[:240],
     )

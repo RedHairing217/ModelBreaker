@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import random
 
+from shared.bands import BAND
 from shared.calculus import (CONSTANT_CHOICES, POINT_CHOICES, classify_trial,
                              sample_harvest_problems, worked_example)
 from shared.harvest import harvest, write_report
@@ -40,8 +41,8 @@ DEFAULTS = {
     "prescreen_trials": 3,
     "trials": 16,
     "temperature": 0.7,
-    "band_low": 0.3,
-    "band_high": 0.7,
+    "band_low": BAND[0],
+    "band_high": BAND[1],
     "max_tokens": 4096,
     "degenerate_threshold": 0.1,
     "timeout": 360,
