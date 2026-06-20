@@ -4,3 +4,19 @@ __pycache__/
 venv/
 reports/*.json
 .DS_Store
+
+# secrets
+.env
+**/.env
+# realmath generated datasets (large, regenerable)
+realmath/MATH_*/
+realmath/NT_*/
+realmath/CO_*/
+realmath/**/papers/
+realmath/**/latex/
+realmath/**/theorems/
+realmath/**/qa_pairs/
+*.arrow
+# python
+__pycache__/
+*.pyc
